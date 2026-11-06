@@ -28,6 +28,9 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   const [error, setError] = useState('');
   const [drag, setDrag] = useState(false);
   const [fallback, setFallback] = useState('');
+  const [aiText, setAiText] = useState('');
+  const [dropNotes, setDropNotes] = useState(true);
+  const [making, setMaking] = useState(false);
   const rootRef = useRef(null);
   const inputRef = useRef(null);
   const fallbackRef = useRef(null);
@@ -70,6 +73,25 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => onToast(okMsg), fail);
     else fail();
     return true;
+  }
+
+  async function downloadWord() {
+    setMaking(true);
+    try {
+      const { buildMinutesWord, stripCorrectionNotes } = await import('../lib/docx.js');
+      const text = dropNotes ? stripCorrectionNotes(aiText) : aiText;
+      const { blob, title } = await buildMinutesWord(text);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${title.replace(/[\\/:*?"<>|]/g, '').slice(0, 60) || '會議紀錄'}.docx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      onToast('Word 已下載');
+    } catch {
+      onToast('Word 檔產生失敗，請確認貼上的內容');
+    } finally {
+      setMaking(false);
+    }
   }
 
   const tabs = [
@@ -185,6 +207,20 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
       {fallback && (
         <textarea ref={fallbackRef} className="input prompt" readOnly rows={6} value={fallback} onFocus={(e) => e.target.select()} />
       )}
+
+      <div className="step-title"><span className="num">3</span>貼回結果，下載 Word</div>
+      <p className="muted small" style={{ margin: '-4px 0 6px' }}>
+        在 Gem 回覆下方按「複製」，貼到這裡，就能下載排好版的 Word（標楷體、標題置中、大項粗體、表格保留）。
+      </p>
+      <textarea className="input prompt" rows={8} value={aiText} onChange={(e) => setAiText(e.target.value)}
+        placeholder="把 Gem 整理好的會議紀錄貼在這裡…" />
+      <label className="check">
+        <input type="checkbox" checked={dropNotes} onChange={(e) => setDropNotes(e.target.checked)} />
+        下載時不包含最後的「修正說明」
+      </label>
+      <button className="btn primary big" onClick={downloadWord} disabled={!aiText.trim() || making}>
+        {making ? '產生中…' : '下載 Word'}
+      </button>
     </section>
   );
 }
