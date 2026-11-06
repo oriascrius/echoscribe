@@ -55,6 +55,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(() => store.get('es.lastResult', null));
   const [toast, setToast] = useState('');
+  const [retrying, setRetrying] = useState(false);
   const abortRef = useRef(null);
   const resultRef = useRef(null);
   const busy = stage !== null;
@@ -102,6 +103,7 @@ export default function App() {
     if (!file) return;
     setError('');
     setElapsed(0);
+    setRetrying(false);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
@@ -110,7 +112,7 @@ export default function App() {
       if (ctrl.signal.aborted) throw new DOMException('', 'AbortError');
       let segments = await transcribeAudio({
         apiKey, model, blob, mimeType, options,
-        onStage: setStage,
+        onStage: (s) => (s === 'retry' ? setRetrying(true) : setStage(s)),
         signal: ctrl.signal,
       });
       if (options.language !== 'en') segments = await toTraditional(segments);
@@ -194,6 +196,7 @@ export default function App() {
                 ))}
               </ol>
               <div className="bar"><span /></div>
+              {retrying && <p className="small" style={{ margin: '0 0 8px' }}>Google 目前比較忙，正在自動重試…</p>}
               <div className="row between">
                 <span className="muted small">已經過 {clock(elapsed, false)}・長音檔可能需要數分鐘，請勿關閉頁面</span>
                 <button className="btn text small" onClick={cancel}>取消</button>
@@ -208,7 +211,18 @@ export default function App() {
         </section>
 
         <div ref={resultRef}>
-          {result && <Result key={result.createdAt} result={result} audioUrl={resultAudio} onToast={showToast} />}
+          {result && (
+            <Result
+              key={result.createdAt}
+              result={result}
+              audioUrl={resultAudio}
+              onToast={showToast}
+              apiKey={apiKey}
+              model={model}
+              onNeedKey={() => setSettingsOpen(true)}
+              onUpdate={(r) => { setResult(r); store.set('es.lastResult', r); }}
+            />
+          )}
         </div>
 
         <Guide />

@@ -36,6 +36,17 @@ export async function toTraditional(segments) {
   return segments.map((s) => ({ ...s, text: cv(s.text), speaker: cv(s.speaker) }));
 }
 
+/** 遞迴把物件內所有字串轉成臺灣繁體（會議記錄用） */
+export async function deepTraditional(value) {
+  const cv = await getConverter();
+  const walk = (v) =>
+    typeof v === 'string' ? cv(v)
+      : Array.isArray(v) ? v.map(walk)
+        : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]))
+          : v;
+  return walk(value);
+}
+
 export function hasSpeakers(segments) {
   return segments.some((s) => s.speaker);
 }

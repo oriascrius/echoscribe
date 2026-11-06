@@ -54,6 +54,22 @@ const SCHEMA = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Google 端忙碌（5xx）時自動重試，最多 3 次 */
+export async function withRetry(fn, { signal, onRetry } = {}) {
+  const waits = [3000, 8000, 15000];
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const busy = [500, 502, 503, 504].includes(e?.status);
+      if (!busy || i >= waits.length || signal?.aborted) throw e;
+      onRetry?.(i + 1);
+      await sleep(waits[i]);
+      checkAbort(signal);
+    }
+  }
+}
+
 function checkAbort(signal) {
   if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
 }
@@ -96,18 +112,22 @@ export async function transcribeAudio({ apiKey, model, blob, mimeType, options, 
     checkAbort(signal);
 
     onStage('transcribe');
-    const res = await ai.models.generateContent({
-      model: model || DEFAULT_MODEL,
-      contents: [{ role: 'user', parts: [audioPart, { text: '請轉錄這段音訊。' }] }],
-      config: {
-        systemInstruction: buildInstruction(options),
-        temperature: 0.2,
-        maxOutputTokens: 65536,
-        responseMimeType: 'application/json',
-        responseSchema: SCHEMA,
-        abortSignal: signal,
-      },
-    });
+    const res = await withRetry(
+      () =>
+        ai.models.generateContent({
+          model: model || DEFAULT_MODEL,
+          contents: [{ role: 'user', parts: [audioPart, { text: '請轉錄這段音訊。' }] }],
+          config: {
+            systemInstruction: buildInstruction(options),
+            temperature: 0.2,
+            maxOutputTokens: 65536,
+            responseMimeType: 'application/json',
+            responseSchema: SCHEMA,
+            abortSignal: signal,
+          },
+        }),
+      { signal, onRetry: () => onStage('retry') }
+    );
 
     const finish = res.candidates?.[0]?.finishReason;
     if (finish === 'MAX_TOKENS')
@@ -150,7 +170,7 @@ export function friendlyError(err) {
   if (status === 404) return '找不到指定的模型，請到「設定」改回預設模型。';
   if (status === 429)
     return '已達 Gemini 使用量上限。免費版每分鐘 5 次、每天 20 次：每分鐘的限制約 1 分鐘後恢復，每日的限制在臺灣時間下午 3～4 點重置。檔案太長（超過約 2 小時）也會出現這個錯誤。';
-  if (status >= 500) return 'Google 伺服器暫時忙碌，請稍候再試。';
+  if (status >= 500) return 'Google 的 AI 目前使用的人太多（已自動重試 3 次仍失敗），請過幾分鐘再試。這不會扣你的額度。';
   if (/Failed to fetch|NetworkError|network/i.test(msg)) return '網路連線失敗，請檢查網路後再試。';
   return msg;
 }

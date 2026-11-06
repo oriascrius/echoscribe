@@ -1,16 +1,77 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FORMATS, clock, hasSpeakers } from '../lib/format.js';
-import { buildDocx } from '../lib/docx.js';
+import { FORMATS, clock, deepTraditional, hasSpeakers } from '../lib/format.js';
+import { buildDocx, buildMinutesDocx } from '../lib/docx.js';
+import { generateMinutes, minutesToText } from '../lib/minutes.js';
+import { friendlyError } from '../lib/gemini.js';
 
-export default function Result({ result, audioUrl, onToast }) {
+const VIEWS = [
+  ...Object.entries(FORMATS).map(([k, f]) => [k, f.label]),
+  ['minutes', '會議記錄'],
+];
+
+function Minutes({ m }) {
+  return (
+    <div className="minutes">
+      <h3>{m.title}</h3>
+      {m.attendees.length > 0 && <p className="muted small">與會者：{m.attendees.join('、')}</p>}
+
+      <h4>會議摘要</h4>
+      <p>{m.summary}</p>
+
+      {m.topics.length > 0 && (
+        <>
+          <h4>討論重點</h4>
+          {m.topics.map((t, i) => (
+            <div key={i} className="topic">
+              <b>{i + 1}. {t.title}</b>
+              <ul>{t.points.map((p, j) => <li key={j}>{p}</li>)}</ul>
+            </div>
+          ))}
+        </>
+      )}
+
+      <h4>決議事項</h4>
+      {m.decisions.length ? <ol>{m.decisions.map((d, i) => <li key={i}>{d}</li>)}</ol> : <p className="muted">（無）</p>}
+
+      <h4>待辦事項</h4>
+      {m.actions.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>事項</th><th>負責人</th><th>期限</th></tr></thead>
+            <tbody>
+              {m.actions.map((a, i) => (
+                <tr key={i}><td>{a.task}</td><td>{a.owner}</td><td>{a.due}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="muted">（無）</p>}
+
+      {m.nextMeeting && (<><h4>下次會議</h4><p>{m.nextMeeting}</p></>)}
+    </div>
+  );
+}
+
+export default function Result({ result, audioUrl, onToast, apiKey, model, onUpdate, onNeedKey }) {
   const [view, setView] = useState('timeline');
   const [now, setNow] = useState(-1);
   const [making, setMaking] = useState(false);
+  const [minutesBusy, setMinutesBusy] = useState(false);
+  const [minutesError, setMinutesError] = useState('');
   const audio = useRef(null);
   const listRef = useRef(null);
-  const { segments, name } = result;
+  const { segments, name, minutes } = result;
 
-  const text = useMemo(() => FORMATS[view].fn(segments), [segments, view]);
+  const duration = segments.at(-1)?.end || 0;
+  const meta = useMemo(
+    () => ({ date: new Date(result.createdAt || Date.now()).toLocaleDateString('zh-TW'), duration }),
+    [result.createdAt, duration]
+  );
+  const isMinutes = view === 'minutes';
+  const text = useMemo(
+    () => (isMinutes ? (minutes ? minutesToText(minutes, meta) : '') : FORMATS[view].fn(segments)),
+    [segments, view, minutes, meta, isMinutes]
+  );
   const speakers = hasSpeakers(segments);
   const active = segments.findIndex((s) => now >= s.start && now < s.end);
 
@@ -48,14 +109,17 @@ export default function Result({ result, audioUrl, onToast }) {
 
   function download() {
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    save(blob, `${base}_${view === 'srt' ? '字幕' : '逐字稿'}.${FORMATS[view].ext}`);
+    const label = isMinutes ? '會議記錄' : view === 'srt' ? '字幕' : '逐字稿';
+    save(blob, `${base}_${label}.${isMinutes ? 'txt' : FORMATS[view].ext}`);
   }
 
   async function downloadWord() {
     setMaking(true);
     try {
-      const blob = await buildDocx({ name, segments, view, createdAt: result.createdAt });
-      save(blob, `${base}_逐字稿.docx`);
+      const blob = isMinutes
+        ? await buildMinutesDocx(minutes, meta)
+        : await buildDocx({ name, segments, view, createdAt: result.createdAt });
+      save(blob, `${base}_${isMinutes ? '會議記錄' : '逐字稿'}.docx`);
     } catch {
       onToast('Word 檔產生失敗，請改下載 .txt');
     } finally {
@@ -63,8 +127,23 @@ export default function Result({ result, audioUrl, onToast }) {
     }
   }
 
+  async function makeMinutes() {
+    if (!apiKey) { onNeedKey(); return; }
+    setMinutesBusy(true);
+    setMinutesError('');
+    try {
+      const m = await deepTraditional(await generateMinutes({ apiKey, model, segments }));
+      onUpdate({ ...result, minutes: m });
+      onToast('會議記錄完成');
+    } catch (e) {
+      setMinutesError(friendlyError(e) || '');
+    } finally {
+      setMinutesBusy(false);
+    }
+  }
+
   const chars = segments.reduce((n, s) => n + s.text.length, 0);
-  const duration = segments.at(-1)?.end || 0;
+  const canExport = !isMinutes || !!minutes;
 
   return (
     <section className="card result">
@@ -76,15 +155,17 @@ export default function Result({ result, audioUrl, onToast }) {
             {speakers && '・含講者'}
           </p>
         </div>
-        <div className="row gap">
-          <button className="btn ghost small" onClick={copy}>複製</button>
-          <button className="btn ghost small" onClick={download}>下載 .{FORMATS[view].ext}</button>
-          {view !== 'srt' && (
-            <button className="btn primary small" onClick={downloadWord} disabled={making}>
-              {making ? '產生中…' : '下載 Word'}
-            </button>
-          )}
-        </div>
+        {canExport && (
+          <div className="row gap">
+            <button className="btn ghost small" onClick={copy}>複製</button>
+            <button className="btn ghost small" onClick={download}>下載 .{isMinutes ? 'txt' : FORMATS[view].ext}</button>
+            {view !== 'srt' && (
+              <button className="btn primary small" onClick={downloadWord} disabled={making}>
+                {making ? '產生中…' : '下載 Word'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {audioUrl && (
@@ -92,12 +173,12 @@ export default function Result({ result, audioUrl, onToast }) {
       )}
 
       <div className="seg">
-        {Object.entries(FORMATS).map(([k, f]) => (
-          <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{f.label}</button>
+        {VIEWS.map(([k, label]) => (
+          <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{label}</button>
         ))}
       </div>
 
-      {view === 'timeline' ? (
+      {view === 'timeline' && (
         <ol className="lines" ref={listRef}>
           {segments.map((s, i) => (
             <li key={i} data-i={i} className={i === active ? 'active' : ''}>
@@ -111,9 +192,32 @@ export default function Result({ result, audioUrl, onToast }) {
             </li>
           ))}
         </ol>
-      ) : (
-        <pre className={`text-out ${view}`}>{text}</pre>
       )}
+      {(view === 'plain' || view === 'srt') && <pre className={`text-out ${view}`}>{text}</pre>}
+
+      {isMinutes && (
+        minutesBusy ? (
+          <div className="progress">
+            <p className="small">正在根據逐字稿整理會議記錄…通常需要 10～30 秒</p>
+            <div className="bar"><span /></div>
+          </div>
+        ) : minutes ? (
+          <>
+            <Minutes m={minutes} />
+            <div className="row end">
+              <button className="btn text small" onClick={makeMinutes}>重新整理一次</button>
+            </div>
+          </>
+        ) : (
+          <div className="empty">
+            <p>AI 會根據逐字稿整理出<b>會議摘要、討論重點、決議事項、待辦事項</b>（含負責人與期限）。</p>
+            <p className="muted small">會使用 1 次 Gemini 額度。內容只根據逐字稿整理，請務必再核對一次。</p>
+            <button className="btn primary" onClick={makeMinutes}>產生會議記錄</button>
+          </div>
+        )
+      )}
+      {isMinutes && minutesError && <p className="field-error" role="alert">{minutesError}</p>}
+
       {view === 'timeline' && audioUrl && <p className="muted small">點時間可以跳到該段播放。</p>}
     </section>
   );
