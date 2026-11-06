@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { CHAT_LINKS, DEFAULT_PROMPT, buildChatText } from '../lib/minutes.js';
+import { useEffect, useRef, useState } from 'react';
+import { GEM_INSTRUCTIONS, isGemUrl } from '../lib/minutes.js';
 import { TEXT_ACCEPT, readTextFile } from '../lib/textfile.js';
 
-const PROMPT_KEY = 'es.minutesPrompt';
 const GEM_KEY = 'es.gemUrl';
 const LONG = 30000;
 
@@ -15,22 +14,22 @@ function save(key, v) {
 
 /**
  * transcript: 目前轉錄結果的純文字（沒有則為 null）
- * focusSignal: 數字改變時切到「使用逐字稿」並捲動到此區塊
+ * focusSignal: 數字改變時切到「剛才的逐字稿」並捲動到此區塊
  */
 export default function MinutesTool({ transcript, transcriptName, onToast, focusSignal }) {
   const [source, setSource] = useState(transcript ? 'transcript' : 'file');
   const [fileText, setFileText] = useState('');
   const [fileName, setFileName] = useState('');
   const [pasted, setPasted] = useState('');
-  const [prompt, setPrompt] = useState(() => load(PROMPT_KEY, DEFAULT_PROMPT));
   const [gemUrl, setGemUrl] = useState(() => load(GEM_KEY, ''));
-  const gemValid = /^https:\/\/gemini\.google\.com\/\S+$/.test(gemUrl.trim());
+  const [editingGem, setEditingGem] = useState(() => !isGemUrl(load(GEM_KEY, '')));
   const [error, setError] = useState('');
   const [drag, setDrag] = useState(false);
-  const [fallback, setFallback] = useState(false);
+  const [fallback, setFallback] = useState('');
   const rootRef = useRef(null);
   const inputRef = useRef(null);
   const fallbackRef = useRef(null);
+  const gemValid = isGemUrl(gemUrl);
 
   // 新的轉錄結果出現時，自動改用逐字稿
   useEffect(() => {
@@ -43,20 +42,13 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
     rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [focusSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const content = source === 'transcript' ? transcript || '' : source === 'file' ? fileText : pasted;
-  const full = useMemo(() => (content.trim() ? buildChatText(prompt, content) : ''), [prompt, content]);
-
-  function changePrompt(v) {
-    setPrompt(v);
-    save(PROMPT_KEY, v);
-  }
+  const content = (source === 'transcript' ? transcript || '' : source === 'file' ? fileText : pasted).trim();
 
   async function pickFile(f) {
     if (!f) return;
     setError('');
     try {
-      const text = await readTextFile(f);
-      setFileText(text);
+      setFileText(await readTextFile(f));
       setFileName(f.name);
     } catch (e) {
       setError(e.message);
@@ -64,17 +56,16 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   }
 
   // 在點擊當下就開始寫入剪貼簿，再讓連結開新分頁（避免手機瀏覽器擋掉）
-  function copyNow(text = full) {
+  function copy(text, okMsg) {
     if (!text) return false;
-    setFallback(false);
-    navigator.clipboard?.writeText(text).then(
-      () => onToast('已複製！在 AI 聊天的輸入框貼上即可'),
-      () => {
-        setFallback(true);
-        onToast('自動複製失敗，請手動複製下方文字');
-        setTimeout(() => fallbackRef.current?.select(), 50);
-      }
-    ) ?? setFallback(true);
+    setFallback('');
+    const fail = () => {
+      setFallback(text);
+      onToast('自動複製失敗，請手動複製下方文字');
+      setTimeout(() => fallbackRef.current?.select(), 50);
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => onToast(okMsg), fail);
+    else fail();
     return true;
   }
 
@@ -88,7 +79,7 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
     <section className="card" id="minutes" ref={rootRef}>
       <h2>整理會議記錄</h2>
       <p className="muted small" style={{ marginTop: -6 }}>
-        把內容連同整理要求一起複製，貼到免費的 AI 聊天，<b>不會使用 API 額度</b>。
+        把會議內容帶到你的 Gemini Gem 整理，<b>不會使用 API 額度</b>。整理格式在 Gem 裡設定。
       </p>
 
       <div className="step-title"><span className="num">1</span>會議內容</div>
@@ -144,66 +135,52 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
       )}
       {error && <p className="field-error">{error}</p>}
 
-      <div className="step-title">
-        <span className="num">2</span>整理要求
-        <span className="grow" />
-        {prompt !== DEFAULT_PROMPT && (
-          <button className="btn text small" onClick={() => changePrompt(DEFAULT_PROMPT)}>恢復預設</button>
-        )}
-      </div>
-      <p className="muted small" style={{ margin: '-4px 0 6px' }}>可以直接修改標題、格式或規則，會自動記住，下次不用重改。</p>
-      <textarea className="input prompt" value={prompt} onChange={(e) => changePrompt(e.target.value)} rows={12} spellCheck={false} />
+      <div className="step-title"><span className="num">2</span>帶到 Gem 整理</div>
 
-      <div className="step-title"><span className="num">3</span>複製並開啟 AI 聊天</div>
+      {editingGem || !gemValid ? (
+        <div className="gem-box">
+          <label className="label" htmlFor="gem-url">我的 Gem 網址</label>
+          <div className="row gap">
+            <input id="gem-url" className="input" value={gemUrl} placeholder="https://gemini.google.com/gem/..."
+              onChange={(e) => { setGemUrl(e.target.value.trim()); save(GEM_KEY, e.target.value.trim()); }} />
+            {gemValid && <button className="btn primary small" onClick={() => setEditingGem(false)}>完成</button>}
+          </div>
+          {gemUrl && !gemValid && <p className="field-error">網址要以 https://gemini.google.com/ 開頭。</p>}
 
-      <div className="gem-box">
-        <label className="label" htmlFor="gem-url">我的 Gem 網址（選填）</label>
-        <input id="gem-url" className="input" value={gemUrl} placeholder="https://gemini.google.com/gem/..."
-          onChange={(e) => { setGemUrl(e.target.value); save(GEM_KEY, e.target.value.trim()); }} />
-        <p className="muted small" style={{ margin: '4px 0 0' }}>
-          {gemUrl && !gemValid
-            ? '網址要以 https://gemini.google.com/ 開頭。'
-            : '把整理要求存在 Gemini 的 Gem 裡，這裡填上它的網址，之後只要複製內容，不用帶整理要求。'}
-        </p>
-        {gemValid && (
+          <details className="gem-help">
+            <summary>還沒有 Gem？建立方式</summary>
+            <ol className="steps">
+              <li>打開 <a href="https://gemini.google.com/gems/view" target="_blank" rel="noreferrer">Gemini 的 Gem 管理員</a>，按「新增 Gem」。</li>
+              <li>名稱取「會議記錄整理」，在「使用說明」貼上下方建議內容（可依需求修改）。</li>
+              <li>儲存後打開這個 Gem，複製網址列的網址，貼到上面的欄位。</li>
+            </ol>
+            <button className="btn ghost small" onClick={() => copy(GEM_INSTRUCTIONS, '已複製建議的使用說明')}>複製建議的使用說明</button>
+            <p className="muted small" style={{ margin: '8px 0 0' }}>之後要改整理格式，請到 Gem 裡修改「使用說明」。</p>
+          </details>
+        </div>
+      ) : (
+        <>
           <a
-            className={`btn primary big gem-btn ${content.trim() ? '' : 'is-disabled'}`}
-            href={content.trim() ? gemUrl.trim() : undefined}
+            className={`btn primary big ${content ? '' : 'is-disabled'}`}
+            href={content ? gemUrl : undefined}
             target="_blank"
             rel="noreferrer"
-            onClick={(e) => { if (!copyNow(content.trim())) e.preventDefault(); }}
+            onClick={(e) => { if (!copy(content, '已複製！在 Gem 的輸入框貼上即可')) e.preventDefault(); }}
           >
             複製內容並開啟我的 Gem ↗
           </a>
-        )}
-      </div>
-
-      <p className="muted small" style={{ margin: '0 0 8px' }}>{gemValid ? '或使用一般 AI 聊天（會連同上方的整理要求一起複製）：' : ''}</p>
-      <div className="chat-grid">
-        {CHAT_LINKS.map(([label, url]) => (
-          <a
-            key={label}
-            className={`btn ${label === 'Gemini' && !gemValid ? 'primary' : 'ghost'} ${full ? '' : 'is-disabled'}`}
-            href={full ? url : undefined}
-            target="_blank"
-            rel="noreferrer"
-            aria-disabled={!full}
-            onClick={(e) => { if (!copyNow()) e.preventDefault(); }}
-          >
-            複製並開啟 {label} ↗
-          </a>
-        ))}
-        <button className="btn ghost" disabled={!full} onClick={() => copyNow()}>只複製</button>
-      </div>
-      <p className="muted small">
-        {full
-          ? <>開啟後在輸入框<b>貼上</b>（電腦按 Ctrl+V，手機長按選「貼上」）再送出。共約 {full.length.toLocaleString()} 字。</>
-          : '請先選擇或貼上會議內容。'}
-        {full.length > LONG && ' 內容較長，免費版 AI 聊天可能一次吃不下，若被截斷請分段貼上。'}
-      </p>
+          <p className="muted small">
+            {content
+              ? <>開啟後在輸入框<b>貼上</b>（電腦按 Ctrl+V，手機長按選「貼上」）再送出。約 {content.length.toLocaleString()} 字。</>
+              : '請先選擇或貼上會議內容。'}
+            {content.length > LONG && ' 內容較長，若 Gem 回覆被截斷請分段貼上。'}
+            {' '}<button className="btn text small" onClick={() => setEditingGem(true)}>更改 Gem 網址</button>
+          </p>
+        </>
+      )}
 
       {fallback && (
-        <textarea ref={fallbackRef} className="input prompt" readOnly rows={6} value={full} onFocus={(e) => e.target.select()} />
+        <textarea ref={fallbackRef} className="input prompt" readOnly rows={6} value={fallback} onFocus={(e) => e.target.select()} />
       )}
     </section>
   );

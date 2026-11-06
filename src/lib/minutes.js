@@ -1,6 +1,7 @@
-// 會議記錄：把「整理要求＋內容」複製到免費 AI 聊天，不使用 API 額度
+// 會議記錄：整理要求存在使用者自己的 Gemini Gem 裡，網站只負責帶上會議內容
 
-export const DEFAULT_PROMPT = `請根據以下會議逐字稿，整理成正式的會議記錄，使用臺灣繁體中文，格式如下：
+// 建立 Gem 時建議貼在「使用說明」的內容（僅供參考，實際以 Gem 內的設定為準）
+export const GEM_INSTRUCTIONS = `你是專業的會議記錄秘書。使用者會貼上會議逐字稿或會議筆記，請整理成正式的會議記錄，使用臺灣繁體中文，格式如下：
 
 【會議名稱】（依內容取一個簡短名稱）
 一、會議摘要（2～4 句）
@@ -10,15 +11,8 @@ export const DEFAULT_PROMPT = `請根據以下會議逐字稿，整理成正式�
 五、下次會議（沒提到就省略）
 
 規則：
-- 只根據逐字稿內容整理，不要編造沒有提到的資訊。
-- 去除口語贅字，用詞精簡正式。`;
+- 只根據使用者提供的內容整理，不要編造沒有提到的資訊。
+- 去除口語贅字，用詞精簡正式。
+- 直接輸出會議記錄，不要加開場白或結尾說明。`;
 
-export const CHAT_LINKS = [
-  ['Gemini', 'https://gemini.google.com/app'],
-  ['ChatGPT', 'https://chatgpt.com/'],
-  ['Claude', 'https://claude.ai/new'],
-];
-
-export function buildChatText(prompt, content) {
-  return `${prompt.trim()}\n\n===== 會議內容 =====\n\n${content.trim()}`;
-}
+export const isGemUrl = (url) => /^https:\/\/gemini\.google\.com\/\S+$/.test((url || '').trim());
