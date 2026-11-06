@@ -54,7 +54,7 @@ const SCHEMA = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Google 端忙碌（5xx）時自動重試，最多 3 次 */
+/** Google 端忙碌（5xx）時自動重試，最多 2 次 */
 export async function withRetry(fn, { signal, onRetry } = {}) {
   // 重試也可能計入每日次數，所以只重試 2 次
   const waits = [5000, 15000];
