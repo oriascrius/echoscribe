@@ -56,7 +56,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Google 端忙碌（5xx）時自動重試，最多 3 次 */
 export async function withRetry(fn, { signal, onRetry } = {}) {
-  const waits = [3000, 8000, 15000];
+  // 重試也可能計入每日次數，所以只重試 2 次
+  const waits = [5000, 15000];
   for (let i = 0; ; i++) {
     try {
       return await fn();
@@ -170,7 +171,7 @@ export function friendlyError(err) {
   if (status === 404) return '找不到指定的模型，請到「設定」改回預設模型。';
   if (status === 429)
     return '已達 Gemini 使用量上限。免費版每分鐘 5 次、每天 20 次：每分鐘的限制約 1 分鐘後恢復，每日的限制在臺灣時間下午 3～4 點重置。檔案太長（超過約 2 小時）也會出現這個錯誤。';
-  if (status >= 500) return 'Google 的 AI 目前使用的人太多（已自動重試 3 次仍失敗），請過幾分鐘再試。這不會扣你的額度。';
+  if (status >= 500) return 'Google 的 AI 目前使用的人太多（已自動重試 2 次仍失敗），請過幾分鐘再試。';
   if (/Failed to fetch|NetworkError|network/i.test(msg)) return '網路連線失敗，請檢查網路後再試。';
   return msg;
 }
