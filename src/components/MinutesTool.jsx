@@ -18,6 +18,8 @@ function save(key, v) {
  */
 export default function MinutesTool({ transcript, transcriptName, onToast, focusSignal }) {
   const [source, setSource] = useState(transcript ? 'transcript' : 'file');
+  const [dismissed, setDismissed] = useState(false); // 使用者移除了逐字稿
+  const hasTranscript = !!transcript && !dismissed;
   const [fileText, setFileText] = useState('');
   const [fileName, setFileName] = useState('');
   const [pasted, setPasted] = useState('');
@@ -33,16 +35,17 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
 
   // 新的轉錄結果出現時，自動改用逐字稿
   useEffect(() => {
-    if (transcript) setSource('transcript');
+    if (transcript) { setDismissed(false); setSource('transcript'); }
   }, [transcript]);
 
   useEffect(() => {
     if (!focusSignal) return;
-    if (transcript) setSource('transcript');
+    if (transcript) { setDismissed(false); setSource('transcript'); }
     rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [focusSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const content = (source === 'transcript' ? transcript || '' : source === 'file' ? fileText : pasted).trim();
+  const active = source === 'transcript' && !hasTranscript ? 'file' : source;
+  const content = (active === 'transcript' ? transcript || '' : active === 'file' ? fileText : pasted).trim();
 
   async function pickFile(f) {
     if (!f) return;
@@ -70,9 +73,9 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   }
 
   const tabs = [
-    ['transcript', '剛才的逐字稿', !transcript],
-    ['file', '上傳文字／Word 檔', false],
-    ['paste', '直接貼上', false],
+    ...(hasTranscript ? [['transcript', '剛才的逐字稿']] : []),
+    ['file', '上傳文字／Word 檔'],
+    ['paste', '直接貼上'],
   ];
 
   return (
@@ -84,25 +87,25 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
 
       <div className="step-title"><span className="num">1</span>會議內容</div>
       <div className="seg">
-        {tabs.map(([k, label, disabled]) => (
-          <button key={k} className={source === k ? 'on' : ''} disabled={disabled} onClick={() => setSource(k)}
-            title={disabled ? '請先在上方完成轉錄' : ''}>
+        {tabs.map(([k, label]) => (
+          <button key={k} className={active === k ? 'on' : ''} onClick={() => setSource(k)}>
             {label}
           </button>
         ))}
       </div>
 
-      {source === 'transcript' && (
+      {active === 'transcript' && (
         <div className="file-card">
           <div className="file-icon" aria-hidden="true">✎</div>
           <div className="file-meta">
             <div className="file-name">{transcriptName}</div>
             <div className="muted small">逐字稿約 {(transcript || '').length.toLocaleString()} 字</div>
           </div>
+          <button className="btn ghost small" onClick={() => { setDismissed(true); setSource('file'); }}>移除</button>
         </div>
       )}
 
-      {source === 'file' && (fileText ? (
+      {active === 'file' && (fileText ? (
         <div className="file-card">
           <div className="file-icon" aria-hidden="true">▤</div>
           <div className="file-meta">
@@ -129,7 +132,7 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
         </div>
       ))}
 
-      {source === 'paste' && (
+      {active === 'paste' && (
         <textarea className="input prompt" rows={8} value={pasted} onChange={(e) => setPasted(e.target.value)}
           placeholder="把會議逐字稿或筆記貼在這裡…" />
       )}
