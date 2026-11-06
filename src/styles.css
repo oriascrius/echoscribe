@@ -210,6 +210,9 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .btn.is-disabled { opacity: 0.5; pointer-events: none; }
 .seg button:disabled { opacity: 0.45; cursor: not-allowed; }
 .result-foot { margin-top: 12px; }
+.gem-box { background: var(--surface-2); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.gem-box .label { margin-top: 0; }
+.gem-btn { margin-top: 12px; }
 .step-title .btn { font-weight: 400; }
 #minutes, #guide { scroll-margin-top: 70px; }
 .minutes-helper > p.small { margin: 0; }

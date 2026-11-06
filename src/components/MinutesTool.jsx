@@ -3,6 +3,7 @@ import { CHAT_LINKS, DEFAULT_PROMPT, buildChatText } from '../lib/minutes.js';
 import { TEXT_ACCEPT, readTextFile } from '../lib/textfile.js';
 
 const PROMPT_KEY = 'es.minutesPrompt';
+const GEM_KEY = 'es.gemUrl';
 const LONG = 30000;
 
 function load(key, fallback) {
@@ -22,6 +23,8 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   const [fileName, setFileName] = useState('');
   const [pasted, setPasted] = useState('');
   const [prompt, setPrompt] = useState(() => load(PROMPT_KEY, DEFAULT_PROMPT));
+  const [gemUrl, setGemUrl] = useState(() => load(GEM_KEY, ''));
+  const gemValid = /^https:\/\/gemini\.google\.com\/\S+$/.test(gemUrl.trim());
   const [error, setError] = useState('');
   const [drag, setDrag] = useState(false);
   const [fallback, setFallback] = useState(false);
@@ -61,10 +64,10 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   }
 
   // 在點擊當下就開始寫入剪貼簿，再讓連結開新分頁（避免手機瀏覽器擋掉）
-  function copyNow() {
-    if (!full) return false;
+  function copyNow(text = full) {
+    if (!text) return false;
     setFallback(false);
-    navigator.clipboard?.writeText(full).then(
+    navigator.clipboard?.writeText(text).then(
       () => onToast('已複製！在 AI 聊天的輸入框貼上即可'),
       () => {
         setFallback(true);
@@ -152,11 +155,35 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
       <textarea className="input prompt" value={prompt} onChange={(e) => changePrompt(e.target.value)} rows={12} spellCheck={false} />
 
       <div className="step-title"><span className="num">3</span>複製並開啟 AI 聊天</div>
+
+      <div className="gem-box">
+        <label className="label" htmlFor="gem-url">我的 Gem 網址（選填）</label>
+        <input id="gem-url" className="input" value={gemUrl} placeholder="https://gemini.google.com/gem/..."
+          onChange={(e) => { setGemUrl(e.target.value); save(GEM_KEY, e.target.value.trim()); }} />
+        <p className="muted small" style={{ margin: '4px 0 0' }}>
+          {gemUrl && !gemValid
+            ? '網址要以 https://gemini.google.com/ 開頭。'
+            : '把整理要求存在 Gemini 的 Gem 裡，這裡填上它的網址，之後只要複製內容，不用帶整理要求。'}
+        </p>
+        {gemValid && (
+          <a
+            className={`btn primary big gem-btn ${content.trim() ? '' : 'is-disabled'}`}
+            href={content.trim() ? gemUrl.trim() : undefined}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { if (!copyNow(content.trim())) e.preventDefault(); }}
+          >
+            複製內容並開啟我的 Gem ↗
+          </a>
+        )}
+      </div>
+
+      <p className="muted small" style={{ margin: '0 0 8px' }}>{gemValid ? '或使用一般 AI 聊天（會連同上方的整理要求一起複製）：' : ''}</p>
       <div className="chat-grid">
         {CHAT_LINKS.map(([label, url]) => (
           <a
             key={label}
-            className={`btn ${label === 'Gemini' ? 'primary' : 'ghost'} ${full ? '' : 'is-disabled'}`}
+            className={`btn ${label === 'Gemini' && !gemValid ? 'primary' : 'ghost'} ${full ? '' : 'is-disabled'}`}
             href={full ? url : undefined}
             target="_blank"
             rel="noreferrer"
@@ -166,7 +193,7 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
             複製並開啟 {label} ↗
           </a>
         ))}
-        <button className="btn ghost" disabled={!full} onClick={copyNow}>只複製</button>
+        <button className="btn ghost" disabled={!full} onClick={() => copyNow()}>只複製</button>
       </div>
       <p className="muted small">
         {full
