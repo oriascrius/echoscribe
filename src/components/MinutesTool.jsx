@@ -5,6 +5,22 @@ import { TEXT_ACCEPT, readTextFile } from '../lib/textfile.js';
 const GEM_KEY = 'es.gemUrl';
 const LONG = 30000;
 
+/** 同步複製（在點擊當下完成，不受開新分頁影響） */
+function copySync(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
 function load(key, fallback) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
@@ -28,6 +44,7 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
   const [error, setError] = useState('');
   const [drag, setDrag] = useState(false);
   const [fallback, setFallback] = useState('');
+  const [copied, setCopied] = useState(0); // 已複製的字數，0 = 尚未複製
   const [aiText, setAiText] = useState('');
   const [dropNotes, setDropNotes] = useState(true);
   const [making, setMaking] = useState(false);
@@ -61,18 +78,37 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
     }
   }
 
-  // 在點擊當下就開始寫入剪貼簿，再讓連結開新分頁（避免手機瀏覽器擋掉）
-  function copy(text, okMsg) {
-    if (!text) return false;
+  function showFallback(text) {
+    setFallback(text);
+    setCopied(0);
+    onToast('自動複製失敗，請手動複製下方文字');
+    setTimeout(() => fallbackRef.current?.select(), 50);
+  }
+
+  function copied_(text, okMsg) {
     setFallback('');
-    const fail = () => {
-      setFallback(text);
-      onToast('自動複製失敗，請手動複製下方文字');
-      setTimeout(() => fallbackRef.current?.select(), 50);
-    };
-    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => onToast(okMsg), fail);
-    else fail();
-    return true;
+    setCopied(text.length);
+    onToast(okMsg);
+  }
+
+  // 一般複製：先同步複製，失敗再用非同步 API
+  function copy(text, okMsg) {
+    if (!text) return;
+    if (copySync(text)) return copied_(text, okMsg);
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => copied_(text, okMsg), () => showFallback(text));
+    else showFallback(text);
+  }
+
+  // 「複製並開啟 Gem」：在開新分頁之前同步完成複製，避免新分頁搶走焦點導致複製失敗
+  function copyAndOpen(e) {
+    if (!content) { e.preventDefault(); return; }
+    if (copySync(content)) { copied_(content, '已複製！到 Gem 的輸入框貼上即可'); return; } // 讓連結正常開啟
+    e.preventDefault();
+    if (!navigator.clipboard) { showFallback(content); return; }
+    navigator.clipboard.writeText(content).then(
+      () => { copied_(content, '已複製！到 Gem 的輸入框貼上即可'); window.open(gemUrl, '_blank', 'noopener'); },
+      () => showFallback(content)
+    );
   }
 
   async function downloadWord() {
@@ -190,13 +226,19 @@ export default function MinutesTool({ transcript, transcriptName, onToast, focus
             href={content ? gemUrl : undefined}
             target="_blank"
             rel="noreferrer"
-            onClick={(e) => { if (!copy(content, '已複製！在 Gem 的輸入框貼上即可')) e.preventDefault(); }}
+            onClick={copyAndOpen}
           >
             複製內容並開啟我的 Gem ↗
           </a>
+          {copied > 0 && copied === content.length ? (
+            <div className="copied-note">
+              <span>✓ 已複製 {copied.toLocaleString()} 字。到 Gem 的輸入框<b>貼上</b>（電腦按 Ctrl+V，手機長按選「貼上」）再送出。</span>
+              <button className="btn text small" onClick={() => copy(content, '已再次複製')}>再複製一次</button>
+            </div>
+          ) : null}
           <p className="muted small">
             {content
-              ? <>開啟後在輸入框<b>貼上</b>（電腦按 Ctrl+V，手機長按選「貼上」）再送出。約 {content.length.toLocaleString()} 字。</>
+              ? <>按下後會<b>自動複製</b>會議內容（約 {content.length.toLocaleString()} 字）並開啟 Gem，你只要在 Gem 貼上。</>
               : '請先選擇或貼上會議內容。'}
             {content.length > LONG && ' 內容較長，若 Gem 回覆被截斷請分段貼上。'}
             {' '}<button className="btn text small" onClick={() => setEditingGem(true)}>更改 Gem 網址</button>
