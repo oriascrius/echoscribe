@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import MinutesTool from './components/MinutesTool.jsx';
 import AudioInput from './components/AudioInput.jsx';
 import Settings from './components/Settings.jsx';
 import Result from './components/Result.jsx';
 import Guide from './components/Guide.jsx';
 import { prepareAudio } from './lib/audio.js';
 import { DEFAULT_MODEL, friendlyError, transcribeAudio } from './lib/gemini.js';
-import { clock, toTraditional } from './lib/format.js';
+import { clock, toPlain, toTraditional } from './lib/format.js';
 
 // localStorage 可能被封鎖（無痕模式等），一律包 try/catch
 const store = {
@@ -56,6 +57,8 @@ export default function App() {
   const [result, setResult] = useState(() => store.get('es.lastResult', null));
   const [toast, setToast] = useState('');
   const [retrying, setRetrying] = useState(false);
+  const [minutesFocus, setMinutesFocus] = useState(0);
+  const transcriptText = useMemo(() => (result ? toPlain(result.segments) : null), [result]);
   const abortRef = useRef(null);
   const resultRef = useRef(null);
   const busy = stage !== null;
@@ -147,7 +150,8 @@ export default function App() {
           <span>EchoScribe</span>
         </div>
         <nav className="row gap">
-          <a className="btn text small" href="#guide">說明與限制</a>
+          <a className="btn text small" href="#minutes">會議記錄</a>
+          <a className="btn text small" href="#guide">說明</a>
           <button className="btn ghost small" onClick={() => setSettingsOpen(true)}>
             <span className={`dot ${apiKey ? 'ok' : ''}`} aria-hidden="true" />設定
           </button>
@@ -212,9 +216,17 @@ export default function App() {
 
         <div ref={resultRef}>
           {result && (
-            <Result key={result.createdAt} result={result} audioUrl={resultAudio} onToast={showToast} />
+            <Result key={result.createdAt} result={result} audioUrl={resultAudio} onToast={showToast}
+              onMinutes={() => setMinutesFocus((n) => n + 1)} />
           )}
         </div>
+
+        <MinutesTool
+          transcript={transcriptText}
+          transcriptName={result?.name || ''}
+          onToast={showToast}
+          focusSignal={minutesFocus}
+        />
 
         <Guide />
 

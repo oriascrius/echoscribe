@@ -1,6 +1,4 @@
-import { toPlain } from './format.js';
-
-// 會議記錄改為「複製提示詞到免費 AI 聊天」，不使用 API 額度
+// 會議記錄：把「整理要求＋內容」複製到免費 AI 聊天，不使用 API 額度
 
 export const DEFAULT_PROMPT = `請根據以下會議逐字稿，整理成正式的會議記錄，使用臺灣繁體中文，格式如下：
 
@@ -21,6 +19,6 @@ export const CHAT_LINKS = [
   ['Claude', 'https://claude.ai/new'],
 ];
 
-export function buildChatText(prompt, segments) {
-  return `${prompt.trim()}\n\n===== 會議逐字稿 =====\n\n${toPlain(segments)}`;
+export function buildChatText(prompt, content) {
+  return `${prompt.trim()}\n\n===== 會議內容 =====\n\n${content.trim()}`;
 }

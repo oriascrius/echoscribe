@@ -1,17 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FORMATS, clock, hasSpeakers } from '../lib/format.js';
 import { buildDocx } from '../lib/docx.js';
-import { CHAT_LINKS, DEFAULT_PROMPT, buildChatText } from '../lib/minutes.js';
 
-const VIEWS = [
-  ...Object.entries(FORMATS).map(([k, f]) => [k, f.label]),
-  ['minutes', '會議記錄'],
-];
-
-const PROMPT_KEY = 'es.minutesPrompt';
-const loadPrompt = () => {
-  try { return localStorage.getItem(PROMPT_KEY) || DEFAULT_PROMPT; } catch { return DEFAULT_PROMPT; }
-};
+const VIEWS = Object.entries(FORMATS).map(([k, f]) => [k, f.label]);
 
 async function copyText(text) {
   try {
@@ -22,75 +13,7 @@ async function copyText(text) {
   }
 }
 
-function MinutesHelper({ segments, onToast }) {
-  const [prompt, setPrompt] = useState(loadPrompt);
-  const [copied, setCopied] = useState(false);
-  const full = useMemo(() => buildChatText(prompt, segments), [prompt, segments]);
-
-  function changePrompt(v) {
-    setPrompt(v);
-    setCopied(false);
-    try { localStorage.setItem(PROMPT_KEY, v); } catch { /* 忽略 */ }
-  }
-
-  async function copyAll() {
-    if (await copyText(full)) {
-      setCopied(true);
-      onToast('已複製，請到 AI 聊天貼上');
-    } else {
-      onToast('複製失敗，請改用電腦版瀏覽器');
-    }
-  }
-
-  return (
-    <div className="minutes-helper">
-      <p>
-        把逐字稿貼到<b>免費的 AI 聊天</b>（Gemini、ChatGPT、Claude）整理成會議記錄，
-        <b>不會使用 API 額度</b>。
-      </p>
-
-      <ol className="steps">
-        <li>確認下方的整理要求（可以自己改標題、格式，網站會記住）</li>
-        <li>按「複製要求＋逐字稿」</li>
-        <li>打開任一個 AI 聊天，貼上後送出</li>
-      </ol>
-
-      <div className="row between">
-        <label className="label" htmlFor="minutes-prompt" style={{ margin: 0 }}>整理要求</label>
-        {prompt !== DEFAULT_PROMPT && (
-          <button className="btn text small" onClick={() => changePrompt(DEFAULT_PROMPT)}>恢復預設</button>
-        )}
-      </div>
-      <textarea
-        id="minutes-prompt"
-        className="input prompt"
-        value={prompt}
-        onChange={(e) => changePrompt(e.target.value)}
-        rows={12}
-        spellCheck={false}
-      />
-
-      <button className="btn primary big" onClick={copyAll}>
-        {copied ? '✓ 已複製，可以去貼上了' : '複製要求＋逐字稿'}
-      </button>
-
-      <div className="chat-links">
-        <span className="muted small">開啟 AI 聊天：</span>
-        {CHAT_LINKS.map(([label, url]) => (
-          <a key={label} className="btn ghost small" href={url} target="_blank" rel="noreferrer">{label} ↗</a>
-        ))}
-      </div>
-
-      <p className="muted small">
-        共約 {full.length.toLocaleString()} 字。
-        {full.length > 30000 && '內容較長，免費版 AI 聊天可能一次吃不下，若被截斷請分段貼上。'}
-        AI 整理的結果請再核對一次再發出。
-      </p>
-    </div>
-  );
-}
-
-export default function Result({ result, audioUrl, onToast }) {
+export default function Result({ result, audioUrl, onToast, onMinutes }) {
   const [view, setView] = useState('timeline');
   const [now, setNow] = useState(-1);
   const [making, setMaking] = useState(false);
@@ -98,8 +21,7 @@ export default function Result({ result, audioUrl, onToast }) {
   const listRef = useRef(null);
   const { segments, name } = result;
 
-  const isMinutes = view === 'minutes';
-  const text = useMemo(() => (isMinutes ? '' : FORMATS[view].fn(segments)), [segments, view, isMinutes]);
+  const text = useMemo(() => FORMATS[view].fn(segments), [segments, view]);
   const speakers = hasSpeakers(segments);
   const active = segments.findIndex((s) => now >= s.start && now < s.end);
   const duration = segments.at(-1)?.end || 0;
@@ -160,17 +82,15 @@ export default function Result({ result, audioUrl, onToast }) {
             {speakers && '・含講者'}
           </p>
         </div>
-        {!isMinutes && (
-          <div className="row gap">
-            <button className="btn ghost small" onClick={copy}>複製</button>
-            <button className="btn ghost small" onClick={download}>下載 .{FORMATS[view].ext}</button>
-            {view !== 'srt' && (
-              <button className="btn primary small" onClick={downloadWord} disabled={making}>
-                {making ? '產生中…' : '下載 Word'}
-              </button>
-            )}
-          </div>
-        )}
+        <div className="row gap">
+          <button className="btn ghost small" onClick={copy}>複製</button>
+          <button className="btn ghost small" onClick={download}>下載 .{FORMATS[view].ext}</button>
+          {view !== 'srt' && (
+            <button className="btn primary small" onClick={downloadWord} disabled={making}>
+              {making ? '產生中…' : '下載 Word'}
+            </button>
+          )}
+        </div>
       </div>
 
       {audioUrl && (
@@ -199,9 +119,11 @@ export default function Result({ result, audioUrl, onToast }) {
         </ol>
       )}
       {(view === 'plain' || view === 'srt') && <pre className={`text-out ${view}`}>{text}</pre>}
-      {isMinutes && <MinutesHelper segments={segments} onToast={onToast} />}
 
-      {view === 'timeline' && audioUrl && <p className="muted small">點時間可以跳到該段播放。</p>}
+      <div className="row between result-foot">
+        <span className="muted small">{view === 'timeline' && audioUrl ? '點時間可以跳到該段播放。' : ''}</span>
+        <button className="btn ghost small" onClick={onMinutes}>整理成會議記錄 ↓</button>
+      </div>
     </section>
   );
 }
