@@ -212,16 +212,7 @@ export default function App() {
 
         <div ref={resultRef}>
           {result && (
-            <Result
-              key={result.createdAt}
-              result={result}
-              audioUrl={resultAudio}
-              onToast={showToast}
-              apiKey={apiKey}
-              model={model}
-              onNeedKey={() => setSettingsOpen(true)}
-              onUpdate={(r) => { setResult(r); store.set('es.lastResult', r); }}
-            />
+            <Result key={result.createdAt} result={result} audioUrl={resultAudio} onToast={showToast} />
           )}
         </div>
 

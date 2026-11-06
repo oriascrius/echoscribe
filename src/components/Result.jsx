@@ -1,79 +1,108 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FORMATS, clock, deepTraditional, hasSpeakers } from '../lib/format.js';
-import { buildDocx, buildMinutesDocx } from '../lib/docx.js';
-import { generateMinutes, minutesToText } from '../lib/minutes.js';
-import { friendlyError } from '../lib/gemini.js';
+import { FORMATS, clock, hasSpeakers } from '../lib/format.js';
+import { buildDocx } from '../lib/docx.js';
+import { CHAT_LINKS, DEFAULT_PROMPT, buildChatText } from '../lib/minutes.js';
 
 const VIEWS = [
   ...Object.entries(FORMATS).map(([k, f]) => [k, f.label]),
   ['minutes', '會議記錄'],
 ];
 
-function Minutes({ m }) {
+const PROMPT_KEY = 'es.minutesPrompt';
+const loadPrompt = () => {
+  try { return localStorage.getItem(PROMPT_KEY) || DEFAULT_PROMPT; } catch { return DEFAULT_PROMPT; }
+};
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function MinutesHelper({ segments, onToast }) {
+  const [prompt, setPrompt] = useState(loadPrompt);
+  const [copied, setCopied] = useState(false);
+  const full = useMemo(() => buildChatText(prompt, segments), [prompt, segments]);
+
+  function changePrompt(v) {
+    setPrompt(v);
+    setCopied(false);
+    try { localStorage.setItem(PROMPT_KEY, v); } catch { /* 忽略 */ }
+  }
+
+  async function copyAll() {
+    if (await copyText(full)) {
+      setCopied(true);
+      onToast('已複製，請到 AI 聊天貼上');
+    } else {
+      onToast('複製失敗，請改用電腦版瀏覽器');
+    }
+  }
+
   return (
-    <div className="minutes">
-      <h3>{m.title}</h3>
-      {m.attendees.length > 0 && <p className="muted small">與會者：{m.attendees.join('、')}</p>}
+    <div className="minutes-helper">
+      <p>
+        把逐字稿貼到<b>免費的 AI 聊天</b>（Gemini、ChatGPT、Claude）整理成會議記錄，
+        <b>不會使用 API 額度</b>。
+      </p>
 
-      <h4>會議摘要</h4>
-      <p>{m.summary}</p>
+      <ol className="steps">
+        <li>確認下方的整理要求（可以自己改標題、格式，網站會記住）</li>
+        <li>按「複製要求＋逐字稿」</li>
+        <li>打開任一個 AI 聊天，貼上後送出</li>
+      </ol>
 
-      {m.topics.length > 0 && (
-        <>
-          <h4>討論重點</h4>
-          {m.topics.map((t, i) => (
-            <div key={i} className="topic">
-              <b>{i + 1}. {t.title}</b>
-              <ul>{t.points.map((p, j) => <li key={j}>{p}</li>)}</ul>
-            </div>
-          ))}
-        </>
-      )}
+      <div className="row between">
+        <label className="label" htmlFor="minutes-prompt" style={{ margin: 0 }}>整理要求</label>
+        {prompt !== DEFAULT_PROMPT && (
+          <button className="btn text small" onClick={() => changePrompt(DEFAULT_PROMPT)}>恢復預設</button>
+        )}
+      </div>
+      <textarea
+        id="minutes-prompt"
+        className="input prompt"
+        value={prompt}
+        onChange={(e) => changePrompt(e.target.value)}
+        rows={12}
+        spellCheck={false}
+      />
 
-      <h4>決議事項</h4>
-      {m.decisions.length ? <ol>{m.decisions.map((d, i) => <li key={i}>{d}</li>)}</ol> : <p className="muted">（無）</p>}
+      <button className="btn primary big" onClick={copyAll}>
+        {copied ? '✓ 已複製，可以去貼上了' : '複製要求＋逐字稿'}
+      </button>
 
-      <h4>待辦事項</h4>
-      {m.actions.length ? (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>事項</th><th>負責人</th><th>期限</th></tr></thead>
-            <tbody>
-              {m.actions.map((a, i) => (
-                <tr key={i}><td>{a.task}</td><td>{a.owner}</td><td>{a.due}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : <p className="muted">（無）</p>}
+      <div className="chat-links">
+        <span className="muted small">開啟 AI 聊天：</span>
+        {CHAT_LINKS.map(([label, url]) => (
+          <a key={label} className="btn ghost small" href={url} target="_blank" rel="noreferrer">{label} ↗</a>
+        ))}
+      </div>
 
-      {m.nextMeeting && (<><h4>下次會議</h4><p>{m.nextMeeting}</p></>)}
+      <p className="muted small">
+        共約 {full.length.toLocaleString()} 字。
+        {full.length > 30000 && '內容較長，免費版 AI 聊天可能一次吃不下，若被截斷請分段貼上。'}
+        AI 整理的結果請再核對一次再發出。
+      </p>
     </div>
   );
 }
 
-export default function Result({ result, audioUrl, onToast, apiKey, model, onUpdate, onNeedKey }) {
+export default function Result({ result, audioUrl, onToast }) {
   const [view, setView] = useState('timeline');
   const [now, setNow] = useState(-1);
   const [making, setMaking] = useState(false);
-  const [minutesBusy, setMinutesBusy] = useState(false);
-  const [minutesError, setMinutesError] = useState('');
   const audio = useRef(null);
   const listRef = useRef(null);
-  const { segments, name, minutes } = result;
+  const { segments, name } = result;
 
-  const duration = segments.at(-1)?.end || 0;
-  const meta = useMemo(
-    () => ({ date: new Date(result.createdAt || Date.now()).toLocaleDateString('zh-TW'), duration }),
-    [result.createdAt, duration]
-  );
   const isMinutes = view === 'minutes';
-  const text = useMemo(
-    () => (isMinutes ? (minutes ? minutesToText(minutes, meta) : '') : FORMATS[view].fn(segments)),
-    [segments, view, minutes, meta, isMinutes]
-  );
+  const text = useMemo(() => (isMinutes ? '' : FORMATS[view].fn(segments)), [segments, view, isMinutes]);
   const speakers = hasSpeakers(segments);
   const active = segments.findIndex((s) => now >= s.start && now < s.end);
+  const duration = segments.at(-1)?.end || 0;
 
   // 播放時讓目前段落保持在可視範圍
   useEffect(() => {
@@ -89,12 +118,7 @@ export default function Result({ result, audioUrl, onToast, apiKey, model, onUpd
   }
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      onToast('已複製到剪貼簿');
-    } catch {
-      onToast('複製失敗，請手動選取文字');
-    }
+    onToast((await copyText(text)) ? '已複製到剪貼簿' : '複製失敗，請手動選取文字');
   }
 
   const base = name.replace(/\.[^.]+$/, '');
@@ -109,17 +133,14 @@ export default function Result({ result, audioUrl, onToast, apiKey, model, onUpd
 
   function download() {
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const label = isMinutes ? '會議記錄' : view === 'srt' ? '字幕' : '逐字稿';
-    save(blob, `${base}_${label}.${isMinutes ? 'txt' : FORMATS[view].ext}`);
+    save(blob, `${base}_${view === 'srt' ? '字幕' : '逐字稿'}.${FORMATS[view].ext}`);
   }
 
   async function downloadWord() {
     setMaking(true);
     try {
-      const blob = isMinutes
-        ? await buildMinutesDocx(minutes, meta)
-        : await buildDocx({ name, segments, view, createdAt: result.createdAt });
-      save(blob, `${base}_${isMinutes ? '會議記錄' : '逐字稿'}.docx`);
+      const blob = await buildDocx({ name, segments, view, createdAt: result.createdAt });
+      save(blob, `${base}_逐字稿.docx`);
     } catch {
       onToast('Word 檔產生失敗，請改下載 .txt');
     } finally {
@@ -127,23 +148,7 @@ export default function Result({ result, audioUrl, onToast, apiKey, model, onUpd
     }
   }
 
-  async function makeMinutes() {
-    if (!apiKey) { onNeedKey(); return; }
-    setMinutesBusy(true);
-    setMinutesError('');
-    try {
-      const m = await deepTraditional(await generateMinutes({ apiKey, model, segments }));
-      onUpdate({ ...result, minutes: m });
-      onToast('會議記錄完成');
-    } catch (e) {
-      setMinutesError(friendlyError(e) || '');
-    } finally {
-      setMinutesBusy(false);
-    }
-  }
-
   const chars = segments.reduce((n, s) => n + s.text.length, 0);
-  const canExport = !isMinutes || !!minutes;
 
   return (
     <section className="card result">
@@ -155,10 +160,10 @@ export default function Result({ result, audioUrl, onToast, apiKey, model, onUpd
             {speakers && '・含講者'}
           </p>
         </div>
-        {canExport && (
+        {!isMinutes && (
           <div className="row gap">
             <button className="btn ghost small" onClick={copy}>複製</button>
-            <button className="btn ghost small" onClick={download}>下載 .{isMinutes ? 'txt' : FORMATS[view].ext}</button>
+            <button className="btn ghost small" onClick={download}>下載 .{FORMATS[view].ext}</button>
             {view !== 'srt' && (
               <button className="btn primary small" onClick={downloadWord} disabled={making}>
                 {making ? '產生中…' : '下載 Word'}
@@ -194,29 +199,7 @@ export default function Result({ result, audioUrl, onToast, apiKey, model, onUpd
         </ol>
       )}
       {(view === 'plain' || view === 'srt') && <pre className={`text-out ${view}`}>{text}</pre>}
-
-      {isMinutes && (
-        minutesBusy ? (
-          <div className="progress">
-            <p className="small">正在根據逐字稿整理會議記錄…通常需要 10～30 秒</p>
-            <div className="bar"><span /></div>
-          </div>
-        ) : minutes ? (
-          <>
-            <Minutes m={minutes} />
-            <div className="row end">
-              <button className="btn text small" onClick={makeMinutes}>重新整理一次</button>
-            </div>
-          </>
-        ) : (
-          <div className="empty">
-            <p>AI 會根據逐字稿整理出<b>會議摘要、討論重點、決議事項、待辦事項</b>（含負責人與期限）。</p>
-            <p className="muted small">會使用 1 次 Gemini 額度。內容只根據逐字稿整理，請務必再核對一次。</p>
-            <button className="btn primary" onClick={makeMinutes}>產生會議記錄</button>
-          </div>
-        )
-      )}
-      {isMinutes && minutesError && <p className="field-error" role="alert">{minutesError}</p>}
+      {isMinutes && <MinutesHelper segments={segments} onToast={onToast} />}
 
       {view === 'timeline' && audioUrl && <p className="muted small">點時間可以跳到該段播放。</p>}
     </section>

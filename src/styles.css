@@ -200,22 +200,14 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 }
 .text-out.srt { font: 13px/1.7 ui-monospace, Consolas, monospace; }
 
-/* 會議記錄 */
-.empty { text-align: center; background: var(--surface-2); border-radius: 10px; padding: 28px 20px; }
-.empty p { margin: 0 0 8px; }
-.empty .btn { margin-top: 10px; }
-.minutes { background: var(--surface-2); border-radius: 10px; padding: 20px 22px; margin-bottom: 8px; }
-.minutes h3 { font-family: 'Noto Serif TC', serif; font-size: 20px; margin: 0 0 4px; }
-.minutes h4 { color: var(--accent-deep); font-size: 15px; margin: 20px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
-.minutes p { margin: 0 0 6px; }
-.minutes ul, .minutes ol { margin: 4px 0 8px; padding-left: 22px; }
-.minutes li { margin-bottom: 2px; }
-.topic { margin-bottom: 6px; }
-.table-wrap { overflow-x: auto; }
-.minutes table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface); border-radius: 8px; overflow: hidden; }
-.minutes th, .minutes td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.minutes th { background: var(--bg); font-weight: 500; white-space: nowrap; }
-.minutes td:not(:first-child) { white-space: nowrap; }
+/* 會議記錄（複製到 AI 聊天） */
+.minutes-helper { background: var(--surface-2); border-radius: 10px; padding: 18px 20px; }
+.minutes-helper > p { margin: 0 0 10px; }
+.minutes-helper .steps { margin-bottom: 14px; }
+.input.prompt { display: block; margin: 6px 0 14px; resize: vertical; min-height: 160px; font-size: 14px; line-height: 1.7; }
+.chat-links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 10px; }
+.minutes-helper > p.small { margin: 0; }
+
 
 /* 說明 */
 .guide { margin-top: 36px; }
